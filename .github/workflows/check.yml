@@ -15,6 +15,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.x"
+      - run: sudo apt-get update && sudo apt-get install -y libpulse0
       - run: uv pip install --system pulsectl>=0.5.0
       - run: uvx ruff check meetmix/ tests/
       - run: uvx ty check --python $(which python) meetmix/ tests/
