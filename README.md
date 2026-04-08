@@ -16,12 +16,14 @@ recording.
 `meetmix` creates a PipeWire virtual audio pipeline:
 
 1. Creates a null sink (`meetmix_combined`) with a monitor source
-2. Routes your Bluetooth mic into the null sink via a loopback
+2. Routes your Bluetooth mic into the null sink via a loopback (this triggers
+   WirePlumber to automatically switch from A2DP to HFP for mic access)
 3. Routes the speaker monitor (other participants' audio) into the null sink via
    a second loopback
-4. Records from `meetmix_combined.monitor` via `parec`
+4. Records from `meetmix_combined.monitor` via `pw-record`
 5. On Ctrl-C, processes the recording with `minutes process`
-6. Tears down all virtual devices on exit
+6. Tears down all virtual devices on exit (WirePlumber restores A2DP
+   automatically)
 
 ## Requirements
 

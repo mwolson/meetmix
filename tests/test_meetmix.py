@@ -322,7 +322,7 @@ class RunRecordTests(unittest.TestCase):
     @mock.patch.object(MEETMIX.subprocess, "run", return_value=mock.Mock(returncode=0))
     @mock.patch.object(MEETMIX.shutil, "which", return_value="/usr/bin/minutes")
     @mock.patch("builtins.print")
-    def test_runs_parec_then_minutes_process(
+    def test_runs_pw_record_then_minutes_process(
         self,
         _print,
         _which,
@@ -342,10 +342,9 @@ class RunRecordTests(unittest.TestCase):
             MEETMIX.run_record(args)
         self.assertEqual(0, ctx.exception.code)
         self.assertEqual(2, run_mock.call_count)
-        parec_cmd = run_mock.call_args_list[0].args[0]
-        self.assertEqual("parec", parec_cmd[0])
-        self.assertIn("--device=meetmix_combined.monitor", parec_cmd)
-        self.assertIn("--file-format=wav", parec_cmd)
+        record_cmd = run_mock.call_args_list[0].args[0]
+        self.assertEqual("pw-record", record_cmd[0])
+        self.assertIn("--target=meetmix_combined.monitor", record_cmd)
         minutes_cmd = run_mock.call_args_list[1].args[0]
         self.assertEqual("minutes", minutes_cmd[0])
         self.assertEqual("process", minutes_cmd[1])

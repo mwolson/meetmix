@@ -40,7 +40,7 @@ def main():
 
 
 def run_record(args):
-    require_commands(["minutes", "parec"])
+    require_commands(["minutes", "pw-record"])
 
     device_match = args.device_match
     if not device_match:
@@ -70,10 +70,9 @@ def run_record(args):
 
     setup_cleanup(module_indices, wav_path)
 
-    parec_cmd = [
-        "parec",
-        f"--device={monitor_source}",
-        "--file-format=wav",
+    record_cmd = [
+        "pw-record",
+        f"--target={monitor_source}",
         wav_path,
     ]
     log(f"Recording to: {wav_path}")
@@ -82,7 +81,7 @@ def run_record(args):
 
     prev_handler = signal.signal(signal.SIGINT, signal.SIG_IGN)
     try:
-        subprocess.run(parec_cmd, preexec_fn=lambda: signal.signal(signal.SIGINT, signal.SIG_DFL))
+        subprocess.run(record_cmd, preexec_fn=lambda: signal.signal(signal.SIGINT, signal.SIG_DFL))
     except KeyboardInterrupt:
         pass
     finally:

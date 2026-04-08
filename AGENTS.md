@@ -4,23 +4,35 @@
 
 meetmix is a Python CLI wrapper around `minutes` that captures both mic input
 and speaker output from Bluetooth devices (like AirPods Pro) into a single
-PipeWire/PulseAudio source for meeting recording on Linux. It uses `parec` to
-record from a virtual combined source, then passes the recording to
+PipeWire/PulseAudio source for meeting recording on Linux. It uses `pw-record`
+to record from a virtual combined source, then passes the recording to
 `minutes process` for transcription.
 
 ## Architecture
 
 1. Uses `pulsectl` to create a PulseAudio null sink + two module-loopback
    instances (mic and speaker monitor routed to the null sink)
-2. Uses `parec` to record from the null sink's monitor source to a WAV file
+2. Uses `pw-record` to record from the null sink's monitor source to a WAV file
 3. On Ctrl-C, passes the WAV to `minutes process --content-type meeting`
 4. Cleans up PipeWire modules on exit (atexit + signal handlers)
 
-The `parec` approach was chosen over `minutes record --device pulse` because
-minutes' cpal/ALSA backend enters a 2-second reconnect loop when module-loopback
-modules are active (WirePlumber triggers "default audio device changed"
-notifications that cpal re-enumerates as device changes). Using `parec` bypasses
-cpal entirely and records directly from PulseAudio.
+Bluetooth profile switching (A2DP to HFP for mic access) is handled
+automatically by WirePlumber's `bluetooth.autoswitch-to-headset-profile`
+setting. When module-loopback connects to the virtual `bluez_input.*` source
+node, WirePlumber detects the link and switches the card to HFP. When meetmix
+exits and the loopback is unloaded, WirePlumber restores A2DP after a 2-second
+timeout. This avoids conflicts with external profile managers like
+`bluetooth-headset-manager` which handle codec selection (e.g., avoiding LC3 on
+adapters where it's broken).
+
+`pw-record` was chosen over `parec` because PulseAudio's client library cannot
+stream from Bluetooth HFP sources through PipeWire's compatibility layer (parec
+produces empty recordings). PipeWire's native `pw-record` works correctly.
+
+The virtual-device approach was chosen over `minutes record --device pulse`
+because minutes' cpal/ALSA backend enters a 2-second reconnect loop when
+module-loopback modules are active (WirePlumber triggers "default audio device
+changed" notifications that cpal re-enumerates as device changes).
 
 ## Conventions
 
@@ -183,9 +195,13 @@ These affect meetmix and may eventually let us simplify or remove it.
 
 - `minutes record --device pulse` enters a 2-second reconnect loop caused by
   WirePlumber reacting to module-loopback creation. Setting `node.passive=true`
-  and `priority.session=0` on the null sink did not prevent this. The `parec`
-  approach avoids the issue entirely.
+  and `priority.session=0` on the null sink did not prevent this. The
+  `pw-record` approach avoids the issue entirely.
 
-- Using `parec` means we lose `minutes record`'s live features (in-flight notes
-  via `minutes note`, auto-stop timers, real-time processing). The recording is
-  processed after capture ends.
+- PulseAudio's `parec` cannot stream from Bluetooth HFP sources through
+  PipeWire's compatibility layer (produces empty WAV files). PipeWire's native
+  `pw-record` works correctly for this use case.
+
+- Using `pw-record` means we lose `minutes record`'s live features (in-flight
+  notes via `minutes note`, auto-stop timers, real-time processing). The
+  recording is processed after capture ends.
