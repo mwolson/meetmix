@@ -12,7 +12,7 @@ import sys
 
 import pulsectl
 
-VERSION = "0.1.0"
+VERSION = "0.1.1"
 
 ALLOWED_CONF_FLAGS = {"--device-match"}
 

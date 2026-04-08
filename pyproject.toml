@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "meetmix"
-version = "0.1.0"
+version = "0.1.1"
 description = "Combine mic + speaker monitor into a single PipeWire source for minutes record"
 license = "MIT"
 readme = "README.md"
