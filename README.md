@@ -42,7 +42,9 @@ cargo install minutes-cli --features cuda
 # AMD GPU:
 cargo install minutes-cli
 
-minutes setup --model small
+# If you have very tiny amounts of RAM/VRAM, use "small" model instead
+minutes setup --model large-v3
+minutes setup --model large-v3 --diarization
 ```
 
 Then install meetmix:
