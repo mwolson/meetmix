@@ -101,7 +101,8 @@ Prefer this for iterating on changes before committing.
    ```
 
 3. Update the version in `pyproject.toml`, `package.json`, and the `VERSION`
-   constant in `meetmix/meetmix.py`, then commit the version bump separately
+   constant in `meetmix/meetmix.py`. Then run `uv lock` to sync `uv.lock` with
+   the new version. Commit the version bump (including `uv.lock`) separately
    from other changes with message `chore: bump version to <version>`.
 
 4. Push the version-bump commit and verify CI passes before tagging:
