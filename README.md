@@ -40,7 +40,9 @@ Install minutes first (pick one):
 # NVidia GPU:
 cargo install minutes-cli --features cuda
 # AMD GPU:
-cargo install minutes-cli
+cargo install minutes-cli --features hipblas
+# or
+cargo install minutes-cli --features vulkan
 
 # If you have very tiny amounts of RAM/VRAM, use "small" model instead
 minutes setup --model large-v3
