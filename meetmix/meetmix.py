@@ -15,7 +15,7 @@ import wave
 
 import pulsectl
 
-VERSION = "0.2.0"
+VERSION = "0.2.1"
 
 ALLOWED_CONF_FLAGS = {"--device-match", "--language"}
 
