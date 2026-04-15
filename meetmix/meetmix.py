@@ -481,6 +481,12 @@ def prepare_source(pulse, source_name):
         if source.name == source_name:
             mute_state = "muted" if source.mute else "unmuted"
             log(f"Source {source_name}: {mute_state}")
+            if source.mute:
+                warn(
+                    "Selected mic source is muted; preserving mute state. "
+                    "This is expected for push-to-talk setups, but mic audio "
+                    "will be silent until the source is unmuted.",
+                )
             vol = source.volume
             vol.value_flat = MIC_VOLUME
             pulse.source_volume_set(source.index, vol)

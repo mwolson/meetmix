@@ -76,9 +76,11 @@ before creating any loopbacks. Relying on WirePlumber's automatic
   module-loopback connected to this stub will never carry real mic audio.
 - WirePlumber's async profile switch destroys and recreates the source node, and
   PulseAudio module-loopback does not reliably reconnect to the new node.
-- The profile switch also resets mic volume to 100%, so meetmix explicitly
-  unmutes and sets volume to 100% after the switch (50% was too quiet for
-  whisper to detect speech in the recording).
+- The profile switch also resets mic volume to 100% and may leave the source
+  muted. meetmix preserves the mute state so push-to-talk setups keep working,
+  but still sets source volume to 100% (50% was too quiet for whisper to detect
+  speech in the recording). A muted source is expected to record silence until
+  it is unmuted.
 
 After the switch, meetmix waits (up to 5 seconds) for the HFP mic source to
 appear before proceeding. On cleanup, meetmix explicitly restores the card to
@@ -337,7 +339,8 @@ causes subtle failures that are difficult to diagnose.
   `wait_for_sink()` blocks until the HFP sink appears (proving the transport is
   up), and by that time the reused source node is delivering real audio.
 - The HFP profile switch resets mic source volume to 100% and may mute the
-  source. Always unmute and set volume after the switch.
+  source. Preserve the mute state so push-to-talk keeps working, but set the
+  source volume to 100% and log clearly when the source is still muted.
 - Switching from A2DP to HFP destroys the A2DP sink, which disconnects any
   browser streams attached to it. PipeWire reassigns them to a fallback sink
   (often HDMI). Sink inputs must be moved to `meetmix_combined` AFTER the HFP

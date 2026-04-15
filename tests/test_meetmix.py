@@ -1908,7 +1908,8 @@ class UnloadModulesTests(unittest.TestCase):
 
 
 class PrepareSourceTests(unittest.TestCase):
-    def test_preserves_mute_and_sets_volume(self):
+    @mock.patch.object(MEETMIX, "warn")
+    def test_preserves_mute_warns_and_sets_volume(self, warn_mock):
         source = make_source("bluez_input.abc", "AirPods Pro")
         source.mute = True
         source.index = 42
@@ -1918,8 +1919,11 @@ class PrepareSourceTests(unittest.TestCase):
         MEETMIX.prepare_source(pulse, "bluez_input.abc")
         pulse.source_mute.assert_not_called()
         pulse.source_volume_set.assert_called_once()
+        warn_mock.assert_called_once()
+        self.assertIn("preserving mute state", warn_mock.call_args.args[0])
 
-    def test_preserves_unmuted_and_sets_volume(self):
+    @mock.patch.object(MEETMIX, "warn")
+    def test_preserves_unmuted_and_sets_volume(self, warn_mock):
         source = make_source("bluez_input.abc", "AirPods Pro")
         source.mute = False
         source.index = 42
@@ -1929,6 +1933,7 @@ class PrepareSourceTests(unittest.TestCase):
         MEETMIX.prepare_source(pulse, "bluez_input.abc")
         pulse.source_mute.assert_not_called()
         pulse.source_volume_set.assert_called_once()
+        warn_mock.assert_not_called()
 
 
 if __name__ == "__main__":

@@ -30,6 +30,9 @@ recording.
 8. Processes the recording with `minutes process`
 
 Logs are written to `~/.minutes/logs/` with timestamps for each session.
+`meetmix` preserves the selected mic source's mute state, so push-to-talk setups
+such as [pttman](https://github.com/mwolson/pttman) continue to work normally
+during recording.
 
 ## Requirements
 
@@ -242,7 +245,12 @@ Orphaned modules are also removed automatically at the start of the next
 meetmix automatically repairs WAV headers when `pw-record` exits uncleanly (e.g.
 from a crash or forced stop). If the recording is still silent, check the
 session log for warnings about the Bluetooth profile reverting during recording,
-or the forwarding loopback process exiting unexpectedly.
+the selected mic source still being muted, or the forwarding loopback process
+exiting unexpectedly.
+
+If your setup uses a push-to-talk solution such as
+[pttman](https://github.com/mwolson/pttman), a muted Bluetooth mic source at
+startup is expected. The recording will stay silent until PTT opens the source.
 
 Use `--keep-recording` to preserve the raw WAV file for manual inspection:
 
