@@ -1093,6 +1093,51 @@ def parse_args(file_args):
         ),
     )
     parser.add_argument("--version", action="version", version=f"%(prog)s {VERSION}")
+    _add_top_level_args(parser)
+
+    sub = parser.add_subparsers(dest="command", title="commands")
+    sub.add_parser("cleanup", help="remove orphaned meetmix PipeWire modules")
+    sub.add_parser("devices", help="list audio sources and sinks")
+    sub.add_parser(
+        "record",
+        help="create virtual devices and run minutes record (default)",
+    )
+
+    args, extra = parser.parse_known_args()
+
+    if extra and extra[0] == "--":
+        # Everything after '--' is explicit passthrough to minutes.
+        extra = extra[1:]
+    elif extra:
+        # argparse with subparsers shunts top-level flags placed after the
+        # subcommand into `extra` (parse_known_args doesn't inherit parent
+        # args into subparsers). Re-parse so flags like --keep-recording work
+        # whether they appear before or after the subcommand.
+        top_only = argparse.ArgumentParser(add_help=False)
+        _add_top_level_args(top_only)
+        top_only.set_defaults(
+            device_match=args.device_match,
+            keep_recording=args.keep_recording,
+            language=args.language,
+        )
+        refined, extra = top_only.parse_known_args(extra)
+        args.device_match = refined.device_match
+        args.keep_recording = refined.keep_recording
+        args.language = refined.language
+
+    args.extra_args = extra if args.command in (None, "record") else []
+
+    args.cli_device_match = args.device_match
+    if not args.device_match and "device_match" in file_args:
+        args.device_match = file_args["device_match"]
+
+    if not args.language and "language" in file_args:
+        args.language = file_args["language"]
+
+    return args
+
+
+def _add_top_level_args(parser):
     parser.add_argument(
         "--device-match",
         help="substring to match Bluetooth device name or description (e.g. 'AirPods')",
@@ -1106,31 +1151,6 @@ def parse_args(file_args):
         "--language",
         help="transcription language code (e.g. 'en', 'es'). Passed to minutes process.",
     )
-
-    sub = parser.add_subparsers(dest="command", title="commands")
-    sub.add_parser("cleanup", help="remove orphaned meetmix PipeWire modules")
-    sub.add_parser("devices", help="list audio sources and sinks")
-    sub.add_parser(
-        "record",
-        help="create virtual devices and run minutes record (default)",
-    )
-
-    args, extra = parser.parse_known_args()
-
-    # Strip leading '--' separator if present
-    if extra and extra[0] == "--":
-        extra = extra[1:]
-
-    args.extra_args = extra if args.command in (None, "record") else []
-
-    args.cli_device_match = args.device_match
-    if not args.device_match and "device_match" in file_args:
-        args.device_match = file_args["device_match"]
-
-    if not args.language and "language" in file_args:
-        args.language = file_args["language"]
-
-    return args
 
 
 def load_conf():

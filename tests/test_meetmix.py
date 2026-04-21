@@ -675,9 +675,9 @@ class ParseArgsTests(unittest.TestCase):
         self.assertEqual("Jabra", args.cli_device_match)
 
     def test_extra_args_passed_through(self):
-        with mock.patch("sys.argv", ["meetmix", "record", "--language", "en"]):
+        with mock.patch("sys.argv", ["meetmix", "record", "--unknown-flag", "foo"]):
             args = MEETMIX.parse_args({})
-        self.assertEqual(["--language", "en"], args.extra_args)
+        self.assertEqual(["--unknown-flag", "foo"], args.extra_args)
 
     def test_extra_args_with_separator(self):
         with mock.patch("sys.argv", ["meetmix", "record", "--", "--language", "en"]):
@@ -689,15 +689,33 @@ class ParseArgsTests(unittest.TestCase):
             args = MEETMIX.parse_args({})
         self.assertEqual([], args.extra_args)
 
+    def test_language_after_subcommand_captured(self):
+        with mock.patch("sys.argv", ["meetmix", "record", "--language", "en"]):
+            args = MEETMIX.parse_args({})
+        self.assertEqual("en", args.language)
+        self.assertEqual([], args.extra_args)
+
     def test_keep_recording_flag(self):
         with mock.patch("sys.argv", ["meetmix", "--keep-recording"]):
             args = MEETMIX.parse_args({})
         self.assertTrue(args.keep_recording)
 
+    def test_keep_recording_after_subcommand(self):
+        with mock.patch("sys.argv", ["meetmix", "record", "--keep-recording"]):
+            args = MEETMIX.parse_args({})
+        self.assertTrue(args.keep_recording)
+        self.assertEqual([], args.extra_args)
+
     def test_keep_recording_defaults_to_false(self):
         with mock.patch("sys.argv", ["meetmix"]):
             args = MEETMIX.parse_args({})
         self.assertFalse(args.keep_recording)
+
+    def test_device_match_after_subcommand(self):
+        with mock.patch("sys.argv", ["meetmix", "record", "--device-match", "AirPods"]):
+            args = MEETMIX.parse_args({})
+        self.assertEqual("AirPods", args.device_match)
+        self.assertEqual([], args.extra_args)
 
 
 class ProcessRecordingTests(unittest.TestCase):
