@@ -521,13 +521,14 @@ pub fn parse_cards(text: &str) -> Vec<Card> {
                 });
             }
         } else if in_properties {
-            for key in ["device.description", "device.alias", "device.name"] {
+            for key in ["device.description", "device.alias"] {
                 let prefix = format!("{} = ", key);
                 if let Some(value) = trimmed.strip_prefix(&prefix) {
                     let value = value.trim_matches('"').to_string();
-                    if !value.is_empty() && card.description.is_empty() {
+                    if !value.is_empty() {
                         card.description = value;
                     }
+                    break;
                 }
             }
         }

@@ -25,13 +25,14 @@ const SINKS: &str = "Sink #12
 
 const CARDS: &str = "Card #5
 \tName: bluez_card.aa_bb
+\tProperties:
+\t\tdevice.name = \"bluez_card.aa_bb\"
+\t\tdevice.description = \"AirPods Pro\"
 \tProfiles:
 \t\ta2dp-sink: High Fidelity Playback (available: yes)
 \t\theadset-head-unit: Headset Head Unit (available: no)
 \t\theadset-head-unit-msbc: Headset Head Unit (available: yes)
 \tActive Profile: a2dp-sink
-\tProperties:
-\t\tdevice.description = \"AirPods Pro\"
 ";
 
 const MODULES: &str = "Module #10
