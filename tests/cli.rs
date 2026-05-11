@@ -1,5 +1,5 @@
 use clap::Parser;
-use meetmix::cli::{Cli, Command};
+use meetmix::cli::{Cli, Command, RecordBackend};
 
 #[test]
 fn no_subcommand_defaults_to_record_dispatch() {
@@ -20,4 +20,22 @@ fn record_passes_unknown_flags_through() {
         panic!("expected record command");
     };
     assert_eq!(extra_args, vec!["--unknown-flag", "foo"]);
+}
+
+#[test]
+fn record_backend_defaults_to_pw_record() {
+    let cli = Cli::try_parse_from(["meetmix"]).unwrap();
+    assert_eq!(cli.record_backend, RecordBackend::PwRecord);
+}
+
+#[test]
+fn record_backend_accepts_minutes() {
+    let cli = Cli::try_parse_from(["meetmix", "--record-backend", "minutes"]).unwrap();
+    assert_eq!(cli.record_backend, RecordBackend::Minutes);
+}
+
+#[test]
+fn no_live_flag_is_accepted() {
+    let cli = Cli::try_parse_from(["meetmix", "--no-live"]).unwrap();
+    assert!(cli.no_live);
 }

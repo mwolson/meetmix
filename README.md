@@ -15,8 +15,11 @@ meeting recording on Linux:
 5. Moves active sink inputs to the combined sink after the HFP switch.
 6. Creates the `meetmix_capture` sink and mixes in Bluetooth mic audio.
 7. Starts the PipeWire loopbacks in the order needed for reliable HFP output.
-8. Records with `pw-record`.
-9. On interrupt, restores audio state and processes the WAV with `minutes`.
+8. Records `meetmix_capture` with `pw-record`.
+9. Runs `minutes live` against `MeetMixCapture` in parallel and echoes finalized
+   utterances as `[live] ...`.
+10. On interrupt, stops live transcription, processes the WAV with Minutes, and
+    restores audio state.
 
 Logs are written under `~/.minutes/logs/`. Recordings are written under
 `~/meetings/recordings/` while they are being processed.
@@ -76,6 +79,30 @@ meetmix record
 ```bash
 meetmix
 ```
+
+The default backend records the combined `meetmix_capture` sink with
+`pw-record`, while `minutes live` listens to the same device for real-time
+transcription. Finalized live utterances are echoed as `[live] ...` while the
+recording is running.
+
+To disable the live transcript and only process after recording:
+
+```bash
+meetmix \-\-no-live
+```
+
+An experimental Minutes/cpal recording backend is also available:
+
+```bash
+meetmix \-\-record-backend minutes
+```
+
+That backend uses Minutes' recording sidecar for live transcription. In short
+test recordings, the sidecar can emit no live lines even when the final batch
+transcript succeeds, so it is not the default.
+
+With the default backend, `\-\-keep-recording` keeps the intermediate
+`~/meetings/recordings/meetmix-*.wav` file after Minutes processing succeeds.
 
 Clean up orphaned virtual modules after an unclean exit:
 

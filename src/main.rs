@@ -30,17 +30,32 @@ fn dispatch(parsed: cli::Cli) -> Result<i32> {
             Ok(0)
         }
         cli::Command::Record { extra_args } => {
-            deps::check_required(&[
+            let live_transcript = !parsed.no_live;
+            let record_backend = if parsed.no_live {
+                cli::RecordBackend::PwRecord
+            } else {
+                parsed.record_backend
+            };
+            let mut required = vec![
                 "minutes",
                 "pactl",
                 "pw-dump",
                 "pw-link",
                 "pw-loopback",
                 "pw-play",
-                "pw-record",
                 "wpctl",
-            ])?;
-            pipeline::run_record(config, parsed.keep_recording, extra_args)
+            ];
+            if record_backend == cli::RecordBackend::PwRecord {
+                required.push("pw-record");
+            }
+            deps::check_required(&required)?;
+            pipeline::run_record(
+                config,
+                parsed.keep_recording,
+                record_backend,
+                live_transcript,
+                extra_args,
+            )
         }
     }
 }

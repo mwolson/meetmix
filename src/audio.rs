@@ -4,12 +4,12 @@ use std::time::{Duration, Instant};
 use anyhow::{anyhow, bail, Context, Result};
 use serde_json::Value;
 
-pub const CAPTURE_SINK_DESCRIPTION: &str = "MeetMix Capture";
+pub const CAPTURE_SINK_DESCRIPTION: &str = "MeetMixCapture";
 pub const CAPTURE_SINK_NAME: &str = "meetmix_capture";
 pub const HEADSET_PROFILES: &[&str] = &["headset-head-unit", "headset-head-unit-msbc"];
 pub const MIC_VOLUME_PERCENT: u32 = 100;
 pub const MODULE_PREFIX: &str = "meetmix_";
-pub const NULL_SINK_DESCRIPTION: &str = "MeetMix Combined";
+pub const NULL_SINK_DESCRIPTION: &str = "MeetMixCombined";
 pub const NULL_SINK_NAME: &str = "meetmix_combined";
 pub const WPCTL_AUTOSWITCH_KEY: &str = "bluetooth.autoswitch-to-headset-profile";
 

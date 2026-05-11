@@ -1,7 +1,9 @@
 use std::fs::File;
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::path::PathBuf;
-use std::process::{Child, Command, Stdio};
+use std::process::{Child, Command, ExitStatus, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{mpsc, Arc};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -9,6 +11,7 @@ use anyhow::{bail, Context, Result};
 use chrono::Local;
 
 use crate::audio::{self, PactlRunner, RealPactl};
+use crate::cli::RecordBackend;
 use crate::config::Config;
 use crate::logging::{self, Logger};
 use crate::process;
@@ -17,6 +20,7 @@ use crate::wav;
 
 const MONITOR_INTERVAL: u32 = 8;
 const SCO_WARMUP_SECONDS: u64 = 3;
+const MINUTES_STOP_GRACE: Duration = Duration::from_secs(3);
 
 pub struct Session {
     pub bt_sink_name: Option<String>,
@@ -25,11 +29,14 @@ pub struct Session {
     pub device_match: Option<String>,
     pub forwarding_loopback: Option<Child>,
     pub keep_recording: bool,
+    pub live_transcript: bool,
+    pub live_proc: Option<Child>,
     pub log_path: Option<PathBuf>,
     pub modules: Vec<(String, String)>,
     pub original_bt_sink_volume: Option<u32>,
     pub original_card_profile: Option<String>,
     pub original_default_sink: Option<String>,
+    pub record_backend: RecordBackend,
     pub record_proc: Option<Child>,
     pub sco_warmup_proc: Option<Child>,
     pub wav_path: Option<PathBuf>,
@@ -44,11 +51,14 @@ impl Default for Session {
             device_match: None,
             forwarding_loopback: None,
             keep_recording: false,
+            live_transcript: true,
+            live_proc: None,
             log_path: None,
             modules: Vec::new(),
             original_bt_sink_volume: None,
             original_card_profile: None,
             original_default_sink: None,
+            record_backend: RecordBackend::PwRecord,
             record_proc: None,
             sco_warmup_proc: None,
             wav_path: None,
@@ -56,7 +66,13 @@ impl Default for Session {
     }
 }
 
-pub fn run_record(config: Config, keep_recording: bool, extra_args: Vec<String>) -> Result<i32> {
+pub fn run_record(
+    config: Config,
+    keep_recording: bool,
+    record_backend: RecordBackend,
+    live_transcript: bool,
+    extra_args: Vec<String>,
+) -> Result<i32> {
     let Some(device_match) = config.device_match.clone() else {
         eprintln!("Error: No --device-match specified.");
         eprintln!("Run 'meetmix devices' to list available audio devices,");
@@ -75,7 +91,9 @@ pub fn run_record(config: Config, keep_recording: bool, extra_args: Vec<String>)
 
     let mut session = Session {
         keep_recording,
+        live_transcript,
         log_path: Some(log_path),
+        record_backend,
         wav_path: Some(recording_dir.join(format!("meetmix-{}.wav", timestamp))),
         ..Session::default()
     };
@@ -88,7 +106,7 @@ pub fn run_record(config: Config, keep_recording: bool, extra_args: Vec<String>)
     let record_result = match setup_result {
         Ok(()) if !signals.stop_requested() => {
             recording_ran = true;
-            run_recording(&runner, &mut session, &signals, &mut logger)
+            run_recording(&mut session, &config, &extra_args, &signals, &mut logger)
         }
         Ok(()) => {
             logger.log("Stop requested during setup, skipping recording.")?;
@@ -100,7 +118,7 @@ pub fn run_record(config: Config, keep_recording: bool, extra_args: Vec<String>)
     cleanup_session(&runner, &mut session, &mut logger)?;
     record_result?;
 
-    if recording_ran {
+    if recording_ran && session.record_backend == RecordBackend::PwRecord {
         process_recording(&mut session, &config, extra_args, &mut logger)
     } else {
         Ok(0)
@@ -256,18 +274,146 @@ fn setup_pipeline(
 }
 
 fn run_recording(
-    runner: &dyn PactlRunner,
     session: &mut Session,
+    config: &Config,
+    extra_args: &[String],
     signals: &signals::Handles,
     logger: &mut Logger,
 ) -> Result<()> {
-    let wav_path = session.wav_path.as_ref().context("missing WAV path")?;
+    match session.record_backend {
+        RecordBackend::Minutes => {
+            run_minutes_recording(session, config, extra_args, signals, logger)
+        }
+        RecordBackend::PwRecord => run_pw_recording(session, config, signals, logger),
+    }
+}
+
+fn run_minutes_recording(
+    session: &mut Session,
+    config: &Config,
+    extra_args: &[String],
+    signals: &signals::Handles,
+    logger: &mut Logger,
+) -> Result<()> {
+    logger.log("Recording with: minutes record (cpal)")?;
+    logger.log(format!(
+        "Capturing from Minutes device: {}",
+        audio::CAPTURE_SINK_DESCRIPTION
+    ))?;
+    logger.log("Live transcript: enabled by Minutes recording sidecar")?;
+    logger.log("Resume any paused media in your browser (the profile switch may pause it).")?;
+    logger.log("Press Ctrl-C to stop recording and queue processing with minutes.")?;
+    logger.log("Minutes will preserve the raw WAV next to the final meeting notes.")?;
+
+    let mut command = Command::new("minutes");
+    command
+        .args([
+            "record",
+            "--device",
+            audio::CAPTURE_SINK_DESCRIPTION,
+            "--intent",
+            "room",
+        ])
+        .args(extra_args);
+    if let Some(language) = &config.language {
+        command.args(["--language", language]);
+    }
+    command.stdout(Stdio::piped());
+    command.stderr(Stdio::piped());
+    let child = command.spawn().context("starting minutes record")?;
+    logger.log(format!("minutes record started (pid {})", child.id()))?;
+    session.record_proc = Some(child);
+
+    let live_stop = Arc::new(AtomicBool::new(false));
+    let live_handle = start_live_transcript_printer(signals.clone(), live_stop.clone(), logger)?;
+    let child_output;
+    if let Some(proc) = session.record_proc.as_mut() {
+        child_output = capture_child_output(proc, "minutes record");
+    } else {
+        stop_live_transcript_printer(live_stop, live_handle);
+        return Ok(());
+    }
+
+    while let Some(proc) = session.record_proc.as_mut() {
+        drain_child_output(&child_output, logger)?;
+        if let Some(status) = proc.try_wait()? {
+            drain_remaining_child_output(&child_output, logger)?;
+            logger.log(format!(
+                "minutes record exited ({})",
+                format_exit_status(&status)
+            ))?;
+            if !status.success() && !signals.stop_requested() {
+                logger.warn(format!(
+                    "Warning: minutes record exited unexpectedly ({})",
+                    format_exit_status(&status)
+                ))?;
+            }
+            session.record_proc = None;
+            stop_live_transcript_printer(live_stop, live_handle);
+            return Ok(());
+        }
+        if signals.stop_requested() {
+            logger.log("Stop requested, waiting for minutes record to finish...")?;
+            if wait_for_child_exit(proc, MINUTES_STOP_GRACE, &child_output, logger)?.is_some() {
+                session.record_proc = None;
+                stop_live_transcript_printer(live_stop, live_handle);
+                return Ok(());
+            } else {
+                logger.log("minutes record still running, asking minutes to stop recording...")?;
+                stop_minutes_recording(logger)?;
+            }
+            break;
+        }
+        thread::sleep(Duration::from_millis(250));
+    }
+
+    if let Some(proc) = session.record_proc.as_mut() {
+        let deadline = Instant::now() + Duration::from_secs(30);
+        while Instant::now() < deadline {
+            drain_child_output(&child_output, logger)?;
+            if let Some(status) = proc.try_wait()? {
+                drain_remaining_child_output(&child_output, logger)?;
+                logger.log(format!(
+                    "minutes record exited ({})",
+                    format_exit_status(&status)
+                ))?;
+                session.record_proc = None;
+                stop_live_transcript_printer(live_stop, live_handle);
+                return Ok(());
+            }
+            thread::sleep(Duration::from_millis(250));
+        }
+        stop_live_transcript_printer(live_stop, live_handle);
+        logger.warn("Warning: minutes record did not exit within 30s after stop request.")?;
+    }
+    Ok(())
+}
+
+fn run_pw_recording(
+    session: &mut Session,
+    config: &Config,
+    signals: &signals::Handles,
+    logger: &mut Logger,
+) -> Result<()> {
+    let wav_path = session
+        .wav_path
+        .as_ref()
+        .context("missing WAV path")?
+        .clone();
+    logger.log("Recording with: pw-record")?;
     logger.log(format!("Recording to: {}", wav_path.display()))?;
     logger.log(format!(
         "Capturing from: {} (target {})",
         audio::CAPTURE_SINK_NAME,
         session.capture_target
     ))?;
+    let live_stop = Arc::new(AtomicBool::new(false));
+    let live_handle = if session.live_transcript {
+        start_minutes_live(session, config, signals, live_stop.clone(), logger)?
+    } else {
+        logger.log("Live transcript: disabled")?;
+        None
+    };
     logger.log("Resume any paused media in your browser (the profile switch may pause it).")?;
     logger.log("Press Ctrl-C to stop recording and process with minutes.")?;
 
@@ -275,22 +421,39 @@ fn run_recording(
     command
         .arg(format!("--target={}", session.capture_target))
         .args(["-P", "stream.capture.sink=true"])
-        .arg(wav_path);
+        .arg(&wav_path);
     apply_log_stdio(&mut command, logger)?;
     let child = command.spawn().context("starting pw-record")?;
     logger.log(format!("pw-record started (pid {})", child.id()))?;
     session.record_proc = Some(child);
 
-    let mut monitor = RecordingMonitor::new(runner, session);
+    let live_output = session
+        .live_proc
+        .as_mut()
+        .map(|proc| capture_child_output(proc, "minutes live"));
+    let runner = RealPactl;
+    let mut monitor = RecordingMonitor::new(&runner, session);
     let mut tick = 0_u32;
     let mut stop_recording = false;
-    while let Some(proc) = session.record_proc.as_mut() {
-        if let Some(status) = proc.try_wait()? {
-            logger.log(format!("pw-record exited (code {:?})", status.code()))?;
+    while session.record_proc.is_some() {
+        if let Some(output) = &live_output {
+            drain_child_output(output, logger)?;
+        }
+        check_live_process(session, &live_output, signals, logger)?;
+        let status = if let Some(proc) = session.record_proc.as_mut() {
+            proc.try_wait()?
+        } else {
+            None
+        };
+        if let Some(status) = status {
+            logger.log(format!(
+                "pw-record exited ({})",
+                format_exit_status(&status)
+            ))?;
             if !status.success() && !signals.stop_requested() {
                 logger.warn(format!(
-                    "Warning: pw-record exited unexpectedly (code {:?})",
-                    status.code()
+                    "Warning: pw-record exited unexpectedly ({})",
+                    format_exit_status(&status)
                 ))?;
             }
             break;
@@ -302,14 +465,309 @@ fn run_recording(
         }
         tick += 1;
         if tick % MONITOR_INTERVAL == 0 {
-            monitor.check(runner, session, logger)?;
+            monitor.check(&runner, session, logger)?;
         }
         thread::sleep(Duration::from_millis(250));
     }
     if stop_recording {
         process::stop_child(&mut session.record_proc);
     }
+    stop_minutes_live(
+        session,
+        live_output.as_ref(),
+        live_stop,
+        live_handle,
+        logger,
+    )?;
     Ok(())
+}
+
+fn start_minutes_live(
+    session: &mut Session,
+    config: &Config,
+    signals: &signals::Handles,
+    live_stop: Arc<AtomicBool>,
+    logger: &mut Logger,
+) -> Result<Option<thread::JoinHandle<()>>> {
+    logger.log("Live transcript: minutes live")?;
+    logger.log(format!(
+        "Live transcript device: {}",
+        audio::CAPTURE_SINK_DESCRIPTION
+    ))?;
+
+    let mut command = Command::new("minutes");
+    command
+        .args(["live", "--device", audio::CAPTURE_SINK_DESCRIPTION])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    if let Some(language) = &config.language {
+        command.args(["--language", language]);
+    }
+    let child = command.spawn().context("starting minutes live")?;
+    logger.log(format!("minutes live started (pid {})", child.id()))?;
+    session.live_proc = Some(child);
+    Ok(Some(start_live_transcript_printer(
+        signals.clone(),
+        live_stop,
+        logger,
+    )?))
+}
+
+fn check_live_process(
+    session: &mut Session,
+    output: &Option<ChildOutput>,
+    signals: &signals::Handles,
+    logger: &mut Logger,
+) -> Result<()> {
+    let Some(proc) = session.live_proc.as_mut() else {
+        return Ok(());
+    };
+    if let Some(status) = proc.try_wait()? {
+        if let Some(output) = output {
+            drain_remaining_child_output(output, logger)?;
+        }
+        logger.log(format!(
+            "minutes live exited ({})",
+            format_exit_status(&status)
+        ))?;
+        if !status.success() && !signals.stop_requested() {
+            logger.warn(format!(
+                "Warning: minutes live exited unexpectedly ({}). Continuing final recording.",
+                format_exit_status(&status)
+            ))?;
+        }
+        session.live_proc = None;
+    }
+    Ok(())
+}
+
+fn stop_minutes_live(
+    session: &mut Session,
+    output: Option<&ChildOutput>,
+    live_stop: Arc<AtomicBool>,
+    live_handle: Option<thread::JoinHandle<()>>,
+    logger: &mut Logger,
+) -> Result<()> {
+    let Some(proc) = session.live_proc.as_mut() else {
+        if let Some(handle) = live_handle {
+            stop_live_transcript_printer(live_stop, handle);
+        }
+        return Ok(());
+    };
+
+    if proc.try_wait()?.is_none() {
+        logger.log("Stopping live transcript...")?;
+        stop_minutes(logger)?;
+        if let Some(output) = output {
+            if wait_for_child_exit(proc, MINUTES_STOP_GRACE, output, logger)?.is_none() {
+                process::stop_child(&mut session.live_proc);
+            }
+        } else {
+            process::stop_child(&mut session.live_proc);
+        }
+    }
+    if let Some(output) = output {
+        drain_remaining_child_output(output, logger)?;
+    }
+    session.live_proc = None;
+    if let Some(handle) = live_handle {
+        stop_live_transcript_printer(live_stop, handle);
+    }
+    Ok(())
+}
+
+fn stop_minutes_recording(logger: &mut Logger) -> Result<()> {
+    stop_minutes(logger)
+}
+
+fn stop_minutes(logger: &mut Logger) -> Result<()> {
+    let output = Command::new("minutes")
+        .arg("stop")
+        .output()
+        .context("running minutes stop")?;
+    for line in String::from_utf8_lossy(&output.stdout).lines() {
+        logger.log_file_only(format!("[minutes stop] {}", line))?;
+    }
+    for line in String::from_utf8_lossy(&output.stderr).lines() {
+        logger.log_file_only(format!("[minutes stop] {}", line))?;
+    }
+    if !output.status.success() {
+        logger.warn(format!(
+            "Warning: minutes stop exited with code {:?}",
+            output.status.code()
+        ))?;
+    }
+    Ok(())
+}
+
+#[derive(Copy, Clone)]
+enum ChildStream {
+    Stdout,
+    Stderr,
+}
+
+struct ChildOutput {
+    label: &'static str,
+    rx: mpsc::Receiver<(ChildStream, String)>,
+}
+
+fn capture_child_output(child: &mut Child, label: &'static str) -> ChildOutput {
+    let (tx, rx) = mpsc::channel();
+    if let Some(stdout) = child.stdout.take() {
+        read_child_lines(stdout, ChildStream::Stdout, tx.clone());
+    }
+    if let Some(stderr) = child.stderr.take() {
+        read_child_lines(stderr, ChildStream::Stderr, tx.clone());
+    }
+    drop(tx);
+    ChildOutput { label, rx }
+}
+
+fn read_child_lines<R: Read + Send + 'static>(
+    reader: R,
+    stream: ChildStream,
+    tx: mpsc::Sender<(ChildStream, String)>,
+) {
+    thread::spawn(move || {
+        for line in BufReader::new(reader).lines().map_while(Result::ok) {
+            if tx.send((stream, line)).is_err() {
+                break;
+            }
+        }
+    });
+}
+
+fn drain_child_output(output: &ChildOutput, logger: &mut Logger) -> Result<()> {
+    while let Ok((stream, line)) = output.rx.try_recv() {
+        emit_child_line(output.label, stream, &line, logger)?;
+    }
+    Ok(())
+}
+
+fn drain_remaining_child_output(output: &ChildOutput, logger: &mut Logger) -> Result<()> {
+    while let Ok((stream, line)) = output.rx.recv_timeout(Duration::from_millis(50)) {
+        emit_child_line(output.label, stream, &line, logger)?;
+    }
+    Ok(())
+}
+
+fn emit_child_line(
+    label: &str,
+    stream: ChildStream,
+    line: &str,
+    logger: &mut Logger,
+) -> Result<()> {
+    match stream {
+        ChildStream::Stdout => println!("{}", line),
+        ChildStream::Stderr => eprintln!("{}", line),
+    }
+    logger.log_file_only(format!("[{}] {}", label, line))?;
+    Ok(())
+}
+
+fn wait_for_child_exit(
+    proc: &mut Child,
+    timeout: Duration,
+    output: &ChildOutput,
+    logger: &mut Logger,
+) -> Result<Option<ExitStatus>> {
+    let deadline = Instant::now() + timeout;
+    while Instant::now() < deadline {
+        drain_child_output(output, logger)?;
+        if let Some(status) = proc.try_wait()? {
+            drain_remaining_child_output(output, logger)?;
+            logger.log(format!(
+                "{} exited ({})",
+                output.label,
+                format_exit_status(&status)
+            ))?;
+            return Ok(Some(status));
+        }
+        thread::sleep(Duration::from_millis(100));
+    }
+    Ok(None)
+}
+
+fn format_exit_status(status: &ExitStatus) -> String {
+    if let Some(code) = status.code() {
+        format!("exit code {}", code)
+    } else {
+        "terminated by signal".to_string()
+    }
+}
+
+fn start_live_transcript_printer(
+    signals: signals::Handles,
+    stop: Arc<AtomicBool>,
+    logger: &Logger,
+) -> Result<thread::JoinHandle<()>> {
+    let log_file = logger.clone_file()?;
+    Ok(thread::spawn(move || {
+        let Some(path) = std::env::var_os("HOME")
+            .map(PathBuf::from)
+            .map(|home| home.join(".minutes/live-transcript.jsonl"))
+        else {
+            return;
+        };
+        let mut offset = std::fs::metadata(&path)
+            .map(|metadata| metadata.len())
+            .unwrap_or(0);
+        while !stop.load(Ordering::SeqCst) && !signals.stop_requested() {
+            if let Ok(metadata) = std::fs::metadata(&path) {
+                if metadata.len() < offset {
+                    offset = 0;
+                }
+                if metadata.len() > offset {
+                    if let Ok(mut file) = File::open(&path) {
+                        use std::io::{Seek, SeekFrom};
+                        if file.seek(SeekFrom::Start(offset)).is_ok() {
+                            let mut reader = BufReader::new(file);
+                            let mut line = String::new();
+                            loop {
+                                line.clear();
+                                let Ok(read) = reader.read_line(&mut line) else {
+                                    break;
+                                };
+                                if read == 0 {
+                                    break;
+                                }
+                                offset += read as u64;
+                                if let Some(text) = live_text_from_json(line.trim_end()) {
+                                    eprintln!("[live] {}", text);
+                                    if let Some(mut file) =
+                                        log_file.as_ref().and_then(|file| file.try_clone().ok())
+                                    {
+                                        let _ = writeln!(
+                                            file,
+                                            "[{}] [live] {}",
+                                            Local::now().format("%H:%M:%S"),
+                                            text
+                                        );
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            thread::sleep(Duration::from_millis(250));
+        }
+    }))
+}
+
+fn stop_live_transcript_printer(stop: Arc<AtomicBool>, handle: thread::JoinHandle<()>) {
+    stop.store(true, Ordering::SeqCst);
+    let _ = handle.join();
+}
+
+fn live_text_from_json(line: &str) -> Option<String> {
+    let value: serde_json::Value = serde_json::from_str(line).ok()?;
+    let text = value.get("text")?.as_str()?.trim();
+    if text.is_empty() {
+        None
+    } else {
+        Some(text.to_string())
+    }
 }
 
 fn cleanup_session(
@@ -318,6 +776,7 @@ fn cleanup_session(
     logger: &mut Logger,
 ) -> Result<()> {
     process::stop_child(&mut session.record_proc);
+    process::stop_child(&mut session.live_proc);
     process::stop_child(&mut session.sco_warmup_proc);
     process::stop_child(&mut session.capture_loopback);
     process::stop_child(&mut session.forwarding_loopback);

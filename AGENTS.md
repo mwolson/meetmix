@@ -4,8 +4,13 @@
 
 meetmix is a Rust CLI wrapper around `minutes` that captures Bluetooth mic input
 and speaker output into one PipeWire recording source on Linux. It uses
-PulseAudio compatibility commands through `pactl`, PipeWire tools for loopbacks
-and recording, then passes the captured WAV to `minutes process`.
+PulseAudio compatibility commands through `pactl` and PipeWire tools for
+loopbacks. By default it records the virtual capture sink with `pw-record` and
+runs `minutes live` in parallel against the cpal-visible `MeetMixCapture`
+device, echoing finalized live transcript lines while preserving the reliable
+PipeWire recording path. `\-\-no-live` disables the live sidecar. The
+experimental `minutes record` cpal backend remains available with
+`\-\-record-backend minutes`.
 
 ## Architecture
 
@@ -28,10 +33,14 @@ Phase 2 builds the recording graph:
 5. Start the forwarding `pw-loopback` from `meetmix_combined` to the HFP sink.
 6. Wait for the forwarding link, then run the SCO warmup.
 7. Start the capture `pw-loopback` from `meetmix_combined` to `meetmix_capture`.
-8. Record with `pw-record`.
+8. Record `meetmix_capture` with `pw-record`. If live transcription is enabled,
+   also run `minutes live \-\-device MeetMixCapture` and echo finalized sidecar
+   JSONL entries as `[live] ...`.
 9. On interrupt, stop child processes, restore the default sink, unload modules,
-   restore the Bluetooth profile, restore WirePlumber autoswitching, and process
-   the WAV with `minutes`.
+   restore the Bluetooth profile, and restore WirePlumber autoswitching. With
+   the default `pw-record` backend, meetmix processes the WAV with
+   `minutes process` after cleanup. With the Minutes backend, `minutes stop`
+   queues processing.
 
 ## Conventions
 

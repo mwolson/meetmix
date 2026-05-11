@@ -1,4 +1,4 @@
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
 
 #[derive(Debug, Parser)]
 #[command(
@@ -15,12 +15,29 @@ pub struct Cli {
     #[arg(long, global = true)]
     pub keep_recording: bool,
 
-    /// Transcription language code passed to minutes process
+    /// Disable live transcription and only process after recording
+    #[arg(long, global = true)]
+    pub no_live: bool,
+
+    /// Recording backend to use after meetmix creates the capture sink
+    #[arg(long, global = true, value_enum, default_value_t = RecordBackend::PwRecord)]
+    pub record_backend: RecordBackend,
+
+    /// Transcription language code passed to minutes
     #[arg(long, global = true, value_name = "CODE")]
     pub language: Option<String>,
 
     #[command(subcommand)]
     pub command: Option<Command>,
+}
+
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, ValueEnum)]
+pub enum RecordBackend {
+    /// Use PipeWire's native pw-record and process the WAV after recording
+    #[default]
+    PwRecord,
+    /// Let Minutes record the meetmix capture device through cpal
+    Minutes,
 }
 
 #[derive(Debug, Subcommand)]
@@ -31,7 +48,7 @@ pub enum Command {
     Devices,
     /// Record with combined audio
     Record {
-        /// Extra arguments passed to minutes process
+        /// Extra arguments passed to the selected minutes command
         #[arg(
             value_name = "ARGS",
             trailing_var_arg = true,
