@@ -1,15 +1,10 @@
 .common-excludes: &common_excludes
-  - "**/.venv/**"
-  - "**/__pycache__/**"
+  - "**/target/**"
 
 .common-setup: &common_setup
   - run: |
-      if ! command -v python3 >/dev/null 2>&1; then
-        echo "python3 is required for pre-commit hooks." >&2
-        exit 1
-      fi
-      if ! command -v uv >/dev/null 2>&1; then
-        echo "uv is required for pre-commit hooks." >&2
+      if ! command -v cargo >/dev/null 2>&1; then
+        echo "cargo is required for pre-commit hooks." >&2
         exit 1
       fi
       if ! command -v bun >/dev/null 2>&1; then
@@ -28,24 +23,26 @@ pre-commit:
       exclude: *common_excludes
       run: bun run fix:md:file {staged_files}
       stage_fixed: true
-    ruff-check:
+    cargo-fmt:
       priority: 1
       glob:
-        - "meetmix/**/*.py"
-        - "tests/**/*.py"
+        - "src/**/*.rs"
+        - "tests/**/*.rs"
       exclude: *common_excludes
-      run: uvx ruff check {staged_files}
-    ty-check:
+      run: cargo fmt --check
+    cargo-check:
       priority: 2
       glob:
-        - "meetmix/**/*.py"
-        - "tests/**/*.py"
+        - "src/**/*.rs"
+        - "tests/**/*.rs"
+        - "Cargo.toml"
       exclude: *common_excludes
-      run: uvx ty check {staged_files}
-    unit-tests:
+      run: cargo check
+    cargo-test:
       priority: 3
       glob:
-        - "meetmix/**/*.py"
-        - "tests/**/*.py"
+        - "src/**/*.rs"
+        - "tests/**/*.rs"
+        - "Cargo.toml"
       exclude: *common_excludes
-      run: uv run python3 -m unittest discover -s tests -v
+      run: cargo test

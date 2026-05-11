@@ -4,15 +4,20 @@
   "private": true,
   "version": "0.2.2",
   "scripts": {
+    "build": "cargo build",
+    "check": "cargo check",
+    "fix": "cargo fmt",
     "fix:md": "prettier --write '**/*.md'",
     "fix:md:file": "prettier --write",
+    "format": "cargo fmt",
     "format:file": "prettier --write",
     "hooks:check": "lefthook run pre-commit --all-files --no-stage-fixed",
     "hooks:pre-commit": "lefthook run pre-commit",
     "hooks:pre-commit:all": "lefthook run pre-commit --all-files",
     "init": "bun run up && bun run init:hooks",
     "init:hooks": "lefthook install",
-    "test": "uv run python3 -m unittest discover -s tests -v",
+    "lint": "cargo clippy --all-targets --all-features -- -D warnings",
+    "test": "cargo test",
     "up": "bun install"
   },
   "devDependencies": {
