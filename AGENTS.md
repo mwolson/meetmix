@@ -170,6 +170,8 @@ When the user provides a version or indicates major, minor, or bugfix:
 5. Enhance the draft release notes with more context:
    - Use insights from examining each commit in step 3.
    - Group related changes under descriptive headings, such as `### Fixed X`.
+   - Avoid a single generic `## Changes` section when the release has multiple
+     themes.
    - Use bullet lists within each section to describe the changes.
    - Include a brief summary of what changed and why it matters.
    - Keep the "Full Changelog" link at the bottom.
@@ -179,6 +181,8 @@ When the user provides a version or indicates major, minor, or bugfix:
    - Put user-visible changes first.
    - Put internal improvements, refactoring, and docs later.
    - Within each section, order by user impact.
+   - Do not include routine verification sections or lists of check commands in
+     public release notes; report validation in the chat handoff instead.
 
 6. Publish the release after review:
 
