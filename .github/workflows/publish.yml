@@ -7,6 +7,53 @@ on:
   workflow_dispatch:
 
 jobs:
+  build:
+    needs: publish
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            asset: meetmix-linux-x86_64
+          - runner: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+            asset: meetmix-linux-x86_64-musl
+          - runner: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+            asset: meetmix-linux-aarch64
+          - runner: macos-14
+            target: aarch64-apple-darwin
+            asset: meetmix-macos-aarch64
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: rustup target add ${{ matrix.target }}
+      - name: Install cross tooling (aarch64)
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        run: sudo apt-get update && sudo apt-get install -y gcc-aarch64-linux-gnu
+      - name: Install musl tooling
+        if: matrix.target == 'x86_64-unknown-linux-musl'
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+      - env:
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
+        run: cargo build --release --target ${{ matrix.target }}
+      - name: Package
+        run: |
+          cp target/${{ matrix.target }}/release/meetmix ${{ matrix.asset }}
+          tar -czf ${{ matrix.asset }}.tar.gz ${{ matrix.asset }} README.md LICENSE
+      - uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          generate_release_notes: true
+          files: ${{ matrix.asset }}.tar.gz
+
   publish:
     runs-on: ubuntu-latest
     environment: crates-io
